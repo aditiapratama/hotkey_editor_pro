@@ -518,20 +518,41 @@ def create_keymap_hierarchy(string_hierarchy):
 	create_keymap_categories_recursive(categories, string_hierarchy, level=0)
 
 class HOTKEY_UL_hotkey_categories(bpy.types.UIList):
-	# Set this to >-1 when drawing a hotkey category with show_children=False.
-	# Set it back to -1 when the hotkey category has an equal or higher level as the one that had show_children=False.
-	parent_level: IntProperty(default=-1)
-	
+	def draw_filter(self, context, layout):
+		# Nothing much to say here, it's usual UI code...
+		row = layout.row()
+
+		subrow = row.row(align=True)
+		subrow.prop(self, "filter_name", text="")
+
+	def filter_items(self, context, data, property):
+		wm = data
+		categories = wm.hotkey_categories
+
+		filter_flags = []	# This could be several bits, but we'll just use all of them, since we just need one flag
+		filter_neworder = range(len(categories))
+		parent_level = -1
+		for i, c in enumerate(categories):
+			if parent_level != -1 and parent_level < c.level:
+				# If this item is a child of the last disabled parent category, don't draw it.
+				filter_flags.append(0)
+			else:
+				filter_flags.append(self.bitflag_filter_item)
+				parent_level = -1
+
+			if not c.show_children:
+				parent_level = c.level
+		
+		# Preserve default filtering behaviour when it is used.
+		helper_funcs = bpy.types.UI_UL_list
+		if self.filter_name:
+			filter_flags = helper_funcs.filter_items_by_name(self.filter_name, self.bitflag_filter_item, categories, "name",
+														  reverse=self.use_filter_sort_reverse)
+
+		return (filter_flags, filter_neworder)
+
 	def draw_item(self, context, layout, data, item, icon, active_data, active_propname):
 		category = item
-		if self.parent_level!=-1 and self.parent_level < category.level:
-			# If this item is a child of the last disabled parent category, don't draw it.
-			return
-		else:
-			self.parent_level = -1
-		if category.show_children==False:
-			self.parent_level = category.level
-		
 
 		if self.layout_type in {'DEFAULT', 'COMPACT'}:
 			split = layout.split(factor=0.01+0.01*category.level)
@@ -548,7 +569,7 @@ class HOTKEY_UL_hotkey_categories(bpy.types.UIList):
 def draw_override(self, context):
 	layout = self.layout
 	wm = context.window_manager
-	
+
 	layout.prop(wm, 'use_custom_hotkey_editor')
 
 	if not wm.use_custom_hotkey_editor:
@@ -575,6 +596,9 @@ classes = [
 	,HOTKEY_UL_hotkey_categories
 ]
 
+def initialize_hotkeys(self, context):
+	create_keymap_hierarchy(keymap_category_hierarchy)
+
 def register():
 	from bpy.utils import register_class
 	for c in classes:
@@ -582,16 +606,15 @@ def register():
 
 	bpy.types.WindowManager.use_custom_hotkey_editor = BoolProperty(
 		name		 = "Hotkey Editor Pro"
-		,default	 = True
+		,default	 = False
 		,description = "Use the custom hotkey editor addon instead of the regular hotkey editor"
+		,update		 = initialize_hotkeys
 	)
 	bpy.types.WindowManager.hotkey_categories = CollectionProperty(type=KeyMapCategory)
 	bpy.types.WindowManager.active_hotkey_category_index = IntProperty()
 	draw_old = bpy.types.USERPREF_PT_keymap.draw
 	bpy.types.USERPREF_PT_keymap.draw_old = draw_old
 	bpy.types.USERPREF_PT_keymap.draw = draw_override
-
-	create_keymap_hierarchy(keymap_category_hierarchy)
 
 def unregister():
 	from bpy.utils import unregister_class
