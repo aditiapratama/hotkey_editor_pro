@@ -22,6 +22,40 @@ from bpy.app.translations import pgettext_iface as iface_
 
 # A "KeyMapItem" is a single shortcut. I may need to abstract this, since I want a single entry of my Shortcut concept to be able to represent several Blender shortcuts.
 
+"""Plan:
+CODE
+	Use the existing hierarchy and filtering code. Currently determining this hierarchy and filtering is done at the same time as drawing, which is not great.
+	But it should mean we can just remove any drawing code and keep the rest.
+
+	So, we can keep track of what categories should be visible.
+
+UI
+	Implement a UIList for the categories that:
+	- supports selecting a single entry.
+	- doesn't allow changing entry names.
+	- Each entry has a clickable arrow to reveal children. (this already exists in Blender)
+	- Maybe the KeyMapCategory class is not needed.
+
+	Then draw this UIList in a column. Then draw another column that shows all the keymap entries of the selected category (including child categories)
+
+HIERARCHY
+	Pretty sure the hierarchy is wrong or non-sensical in some cases.
+	- What's the difference between Window and Screen?
+	- What on earth is View2D Buttons List?
+	- "Paint Vertex Selection (Weight, Vertex)" would be nice if it could be the child of two categories. So it could just be called "Paint Vertex Selection", but show up under both Weight and Vertex Paint (and therefore cause conflicts for both)
+	- Same for Paint Face Mask
+	- Image Paint has an Image Paint (Global) despite not having any other categories....
+	- I wonder when the "Animation" context is active... does Blender even know these things!? What a mess to untangle...
+
+	All of this is stored in python in keymap_hierarchy.py. Shame it's a non-sensical hierarchy!
+	Keymaps have a poll function, these would help determine a more legitimate hierarchy. Search the code for WM_keymap_ensure. After each, there should be a poll function specified.
+	I think this can work but it will be pure old manual labour.
+
+	So, we will probably end up creating our own keymap category hierarchy, that will be a total mish-mash of Blender's keymap categories.
+	So, it would be good to make a mapping from our keymap categories to the list of blender keymap categories whose keymaps should be included within.
+	WHAT A GLORIOUS MESS THIS WILL BE!
+"""
+
 drawn_keymap_categories = []
 
 _EVENT_TYPES = set()
