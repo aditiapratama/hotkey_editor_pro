@@ -11,7 +11,7 @@ bl_info = {
 }
 
 import bpy
-from bpy.props import BoolProperty, CollectionProperty, PointerProperty, StringProperty
+from bpy.props import BoolProperty, CollectionProperty, PointerProperty, StringProperty, IntProperty
 from rna_keymap_ui import _indented_layout
 from bpy.app.translations import contexts as i18n_contexts
 from bpy.app.translations import pgettext_iface as iface_
@@ -55,6 +55,7 @@ HIERARCHY
 	So, it would be good to make a mapping from our keymap categories to the list of blender keymap categories whose keymaps should be included within.
 	WHAT A GLORIOUS MESS THIS WILL BE!
 """
+
 
 drawn_keymap_categories = []
 
@@ -455,6 +456,7 @@ def draw_keymaps(context, layout):
 
 class KeyMapEntry(bpy.types.PropertyGroup):
 	# A single HotkeyEditorPro keymap entry can mask several Blender keymaps. Not yet sure how to identify and store which ones are masked...
+		# Probably just an external dictionary where the Keys are KeyMapEntry objects and the values are lists of bpy.types.KeyMapItem.
 	idname: StringProperty()
 	active: BoolProperty()
 	#etc etc....
@@ -465,6 +467,61 @@ class KeyMapCategory(bpy.types.PropertyGroup):
 	selected: BoolProperty()
 	warning: BoolProperty()
 	keymap_entries: CollectionProperty(type=KeyMapEntry)
+	level: IntProperty(default=0)
+
+# We define our own keymap category hierarchy, completely independent of that of Blender's.
+keymap_category_hierarchy = {
+	# Dictionaries contain dictionaries or lists
+	# Lists contain strings.
+	# Use empty dictionaries to represent strings at the dictionary level.
+	"Window" : {
+		"Window (Global)" : {},
+		"3D View" : [
+			"3D View (Global)",
+			"Object Mode",
+			"Mesh Edit Mode",
+			"Curve Edit Mode",
+			"Armature Edit Mode",
+		],
+		"Image Editor" : [
+			"Image Editor (Global)",
+			"UV Editor",
+			"Image Paint",
+			"Image Generic"
+		]
+	}
+}
+
+def create_keymap_categories_recursive(categories:bpy.props.CollectionProperty, string_dict, level=0):
+	for cat_name in string_dict.keys():
+		new_cat = categories.add()
+		new_cat.name = cat_name
+		new_cat.level = level
+		if type(string_dict[cat_name]) == list:
+			for child_cat in string_dict[cat_name]:
+				new_cat = categories.add()
+				new_cat.name = child_cat
+				new_cat.level = level+1
+		if type(string_dict[cat_name]) == dict:
+			create_keymap_categories_recursive(categories, string_dict[cat_name], level+1)
+
+def create_keymap_hierarchy(string_hierarchy):
+	"""Create a hierarchy of KeyMapCategory items based on the strings representing the categories' names."""
+	wm = bpy.context.window_manager
+	categories = wm.hotkey_categories
+	categories.clear()
+	create_keymap_categories_recursive(categories, string_hierarchy, level=0)
+
+class HOTKEY_UL_hotkey_categories(bpy.types.UIList):
+	def draw_item(self, context, layout, data, item, icon, active_data, active_propname):
+		category = item
+		if self.layout_type in {'DEFAULT', 'COMPACT'}:
+			split = layout.split(factor=0.001+0.01*category.level)
+			split.row()
+			split.prop(category, 'name', text="", emboss=False)
+		elif self.layout_type in {'GRID'}:
+			layout.alignment = 'CENTER'
+			layout.label(text="", icon_value=icon)
 
 def draw_override(self, context):
 	layout = self.layout
@@ -476,12 +533,24 @@ def draw_override(self, context):
 		bpy.types.USERPREF_PT_keymap.draw_old(self, context)
 		return
 	
-	draw_keymaps(context, layout)
-	print(drawn_keymap_categories)
+	layout.template_list(
+		'HOTKEY_UL_hotkey_categories'
+		,''
+		,wm
+		,'hotkey_categories'
+		,wm
+		,'active_hotkey_category_index'
+		,rows = len(wm.hotkey_categories)
+		,maxrows = len(wm.hotkey_categories)
+	)
+
+	# draw_keymaps(context, layout)
+	# print(drawn_keymap_categories)
 
 classes = [
 	KeyMapEntry
 	,KeyMapCategory
+	,HOTKEY_UL_hotkey_categories
 ]
 
 def register():
@@ -494,9 +563,13 @@ def register():
 		,default	 = True
 		,description = "Use the custom hotkey editor addon instead of the regular hotkey editor"
 	)
+	bpy.types.WindowManager.hotkey_categories = CollectionProperty(type=KeyMapCategory)
+	bpy.types.WindowManager.active_hotkey_category_index = IntProperty()
 	draw_old = bpy.types.USERPREF_PT_keymap.draw
 	bpy.types.USERPREF_PT_keymap.draw_old = draw_old
 	bpy.types.USERPREF_PT_keymap.draw = draw_override
+
+	create_keymap_hierarchy(keymap_category_hierarchy)
 
 def unregister():
 	from bpy.utils import unregister_class
@@ -506,5 +579,6 @@ def unregister():
 	bpy.types.USERPREF_PT_keymap.draw = bpy.types.USERPREF_PT_keymap.draw_old
 	del bpy.types.USERPREF_PT_keymap.draw_old
 	del bpy.types.WindowManager.use_custom_hotkey_editor
+	del bpy.types.WindowManager.hotkey_categories
 
 
