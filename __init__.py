@@ -463,11 +463,13 @@ class KeyMapEntry(bpy.types.PropertyGroup):
 	# keymaps: CollectionProperty(type=bpy.types.KeyMapItem)
 
 class KeyMapCategory(bpy.types.PropertyGroup):
-	name: StringProperty(name="Name")
-	selected: BoolProperty()
-	warning: BoolProperty()
+	name: StringProperty(name="Category Name")
+	warning: BoolProperty()						# Whether this category has a key conflict somewhere within it
 	keymap_entries: CollectionProperty(type=KeyMapEntry)
-	level: IntProperty(default=0)
+	level: IntProperty(default=0)				# How nested this category is
+	has_children: BoolProperty(default=False)	# Whether to draw the children drop-down arrow
+	show_children: BoolProperty(default=True)	# This is the children drop-down arrow.
+	poll_description: StringProperty 			# A string to describe the poll function of this category.
 
 # We define our own keymap category hierarchy, completely independent of that of Blender's.
 keymap_category_hierarchy = {
@@ -498,12 +500,15 @@ def create_keymap_categories_recursive(categories:bpy.props.CollectionProperty, 
 		new_cat.name = cat_name
 		new_cat.level = level
 		if type(string_dict[cat_name]) == list:
+			new_cat.has_children = True
 			for child_cat in string_dict[cat_name]:
 				new_cat = categories.add()
 				new_cat.name = child_cat
 				new_cat.level = level+1
 		if type(string_dict[cat_name]) == dict:
-			create_keymap_categories_recursive(categories, string_dict[cat_name], level+1)
+			if len(string_dict[cat_name])>0:
+				new_cat.has_children = True
+				create_keymap_categories_recursive(categories, string_dict[cat_name], level+1)
 
 def create_keymap_hierarchy(string_hierarchy):
 	"""Create a hierarchy of KeyMapCategory items based on the strings representing the categories' names."""
@@ -513,12 +518,29 @@ def create_keymap_hierarchy(string_hierarchy):
 	create_keymap_categories_recursive(categories, string_hierarchy, level=0)
 
 class HOTKEY_UL_hotkey_categories(bpy.types.UIList):
+	# Set this to >-1 when drawing a hotkey category with show_children=False.
+	# Set it back to -1 when the hotkey category has an equal or higher level as the one that had show_children=False.
+	parent_level: IntProperty(default=-1)
+	
 	def draw_item(self, context, layout, data, item, icon, active_data, active_propname):
 		category = item
+		if self.parent_level!=-1 and self.parent_level < category.level:
+			# If this item is a child of the last disabled parent category, don't draw it.
+			return
+		else:
+			self.parent_level = -1
+		if category.show_children==False:
+			self.parent_level = category.level
+		
+
 		if self.layout_type in {'DEFAULT', 'COMPACT'}:
-			split = layout.split(factor=0.001+0.01*category.level)
-			split.row()
-			split.prop(category, 'name', text="", emboss=False)
+			split = layout.split(factor=0.01+0.01*category.level)
+			if category.has_children:
+				icon = 'TRIA_DOWN' if category.show_children else 'TRIA_RIGHT'
+				split.prop(category, 'show_children', icon=icon, text="", emboss=False)
+			else:
+				split.row()
+			split.label(text=category.name)
 		elif self.layout_type in {'GRID'}:
 			layout.alignment = 'CENTER'
 			layout.label(text="", icon_value=icon)
