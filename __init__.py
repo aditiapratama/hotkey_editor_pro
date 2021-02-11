@@ -469,6 +469,7 @@ class KeyMapCategory(bpy.types.PropertyGroup):
 	level: IntProperty(default=0)				# How nested this category is
 	has_children: BoolProperty(default=False)	# Whether to draw the children drop-down arrow
 	show_children: BoolProperty(default=True)	# This is the children drop-down arrow.
+	parent_category: StringProperty()			# Name of the parent keymap category. (Cannot be an actual reference sadly)
 	poll_description: StringProperty 			# A string to describe the poll function of this category.
 
 # We define our own keymap category hierarchy, completely independent of that of Blender's.
@@ -494,28 +495,32 @@ keymap_category_hierarchy = {
 	}
 }
 
-def create_keymap_categories_recursive(categories:bpy.props.CollectionProperty, string_dict, level=0):
+def create_keymap_categories_recursive(categories:bpy.props.CollectionProperty, string_dict, parent_name, level=0):
+	# Populate the hotkey_categories CollectionProperty with entries. This should run once when the addon is enabled or after Blender has loaded. (TODO)
 	for cat_name in string_dict.keys():
-		new_cat = categories.add()
-		new_cat.name = cat_name
-		new_cat.level = level
-		if type(string_dict[cat_name]) == list:
-			new_cat.has_children = True
-			for child_cat in string_dict[cat_name]:
-				new_cat = categories.add()
-				new_cat.name = child_cat
-				new_cat.level = level+1
-		if type(string_dict[cat_name]) == dict:
-			if len(string_dict[cat_name])>0:
-				new_cat.has_children = True
-				create_keymap_categories_recursive(categories, string_dict[cat_name], level+1)
+		entry = string_dict[cat_name]
+		cat = categories.add()
+		cat.name = cat_name
+		cat.level = level
+		cat.parent_category = parent_name
+		if type(entry) == list:
+			cat.has_children = True
+			for child_name in entry:
+				child_cat = categories.add()
+				child_cat.name = child_name
+				child_cat.level = level+1
+				child_cat.parent_category = cat_name
+		if type(entry) == dict:
+			if len(entry)>0:
+				cat.has_children = True
+				create_keymap_categories_recursive(categories, entry, cat_name, level+1)
 
 def create_keymap_hierarchy(string_hierarchy):
 	"""Create a hierarchy of KeyMapCategory items based on the strings representing the categories' names."""
 	wm = bpy.context.window_manager
 	categories = wm.hotkey_categories
 	categories.clear()
-	create_keymap_categories_recursive(categories, string_hierarchy, level=0)
+	create_keymap_categories_recursive(categories, string_hierarchy, parent_name="", level=0)
 
 class HOTKEY_UL_hotkey_categories(bpy.types.UIList):
 	def draw_filter(self, context, layout):
@@ -531,17 +536,21 @@ class HOTKEY_UL_hotkey_categories(bpy.types.UIList):
 
 		filter_flags = []	# This could be several bits, but we'll just use all of them, since we just need one flag
 		filter_neworder = range(len(categories))
-		parent_level = -1
-		for i, c in enumerate(categories):
-			if parent_level != -1 and parent_level < c.level:
-				# If this item is a child of the last disabled parent category, don't draw it.
-				filter_flags.append(0)
-			else:
-				filter_flags.append(self.bitflag_filter_item)
-				parent_level = -1
+		for c in categories:
+			# Recursively check that all parents are enabled.
+			child = c
+			enabled = True
+			while child and child.parent_category != "":
+				parent_cat = categories.get(child.parent_category)
+				if not parent_cat.show_children:
+					enabled = False
+				child = parent_cat
 
-			if not c.show_children:
-				parent_level = c.level
+			if enabled:
+				filter_flags.append(self.bitflag_filter_item)
+			else:
+				# If the parent category is disabled, don't draw this entry.
+				filter_flags.append(0)
 		
 		# Preserve default filtering behaviour when it is used.
 		helper_funcs = bpy.types.UI_UL_list
